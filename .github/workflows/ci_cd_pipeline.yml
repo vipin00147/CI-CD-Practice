@@ -9,6 +9,7 @@ on:
 
 jobs:
   lint:
+    name: "Checking out the code"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the code
