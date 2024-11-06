@@ -35,11 +35,11 @@ jobs:
 
       - name: Decrypt keystore
         run: |
-          echo "${{ secrets.KEYSTORE_FILE }}" | base64 --decode > keystore.jks
+          echo "${{ secrets.KEYSTORE_FILE }}" | base64 --decode > ci_cd_keystore.jks
 
       - name: Build signed APK
         run: |
-          ./gradlew assembleRelease --stacktrace -Pandroid.injected.signing.store.file=keystore.jks \
+          ./gradlew assembleRelease --stacktrace -Pandroid.injected.signing.store.file=ci_cd_keystore.jks.jks \
                                      -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} \
                                      -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} \
                                      -Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }}
