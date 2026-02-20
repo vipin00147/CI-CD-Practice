@@ -18,6 +18,7 @@ jobs:
         domain:
           - stageapi.currently.social
           - stagegame.currently.social
+          - stage.chat.currently.social
 
     steps:
       - uses: actions/checkout@v4
