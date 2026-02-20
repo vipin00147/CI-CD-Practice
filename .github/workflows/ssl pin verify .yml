@@ -9,17 +9,29 @@ permissions:
   contents: write
 
 jobs:
+  load_domains:
+    name: Load Domains
+    runs-on: ubuntu-latest
+    outputs:
+      domains: ${{ steps.set-matrix.outputs.domains }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: set-matrix
+        run: |
+          DOMAINS=$(jq -c '.domains' ssl_domains.json)
+          echo "domains=$DOMAINS" >> $GITHUB_OUTPUT
+
+
   verify_ssl:
     name: Verify SSL - ${{ matrix.domain }}
     runs-on: ubuntu-latest
+    needs: load_domains
 
     strategy:
       matrix:
-        domain:
-          - stageapi.currently.social
-          - stagegame.currently.social
-          - stage.chat.currently.social
-          - dev.analytics.currently.social
+        domain: ${{ fromJson(needs.load_domains.outputs.domains) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +63,6 @@ jobs:
           GENERATED_PIN="sha256/$PIN"
           echo "Generated Pin: $GENERATED_PIN"
 
-          # Create domain-only JSON fragment
           echo "{ \"${DOMAIN}\": [\"${GENERATED_PIN}\"] }" > domain.json
 
       - name: Upload domain JSON fragment
@@ -83,14 +94,11 @@ jobs:
 
           FILES=""
 
-          # Include existing file if present
           if [ -f "$FINAL_FILE" ]; then
             FILES="$FINAL_FILE"
           fi
 
-          # Add all domain fragments
           for file in $(find artifacts -name domain.json); do
-            echo "Found fragment: $file"
             FILES="$FILES $file"
           done
 
