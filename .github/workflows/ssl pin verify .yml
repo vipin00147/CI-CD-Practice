@@ -1,4 +1,4 @@
-name: SSL Pin Verification
+name: Dynamic SSL Pin Auto Update
 
 on:
   push:
@@ -8,9 +8,17 @@ on:
 permissions:
   contents: write
 
+# 🔒 Prevent concurrent pushes (very important)
+concurrency:
+  group: ssl-pin-update
+  cancel-in-progress: false
+
 jobs:
+
+  # -----------------------------------------
+  # Load domains dynamically
+  # -----------------------------------------
   load_domains:
-    name: Load Domains
     runs-on: ubuntu-latest
     outputs:
       domains: ${{ steps.set-matrix.outputs.domains }}
@@ -24,10 +32,12 @@ jobs:
           echo "domains=$DOMAINS" >> $GITHUB_OUTPUT
 
 
-  verify_ssl:
-    name: Verify SSL - ${{ matrix.domain }}
-    runs-on: ubuntu-latest
+  # -----------------------------------------
+  # Generate SSL Pin per domain
+  # -----------------------------------------
+  generate_pins:
     needs: load_domains
+    runs-on: ubuntu-latest
 
     strategy:
       matrix:
@@ -65,27 +75,29 @@ jobs:
 
           echo "{ \"${DOMAIN}\": [\"${GENERATED_PIN}\"] }" > domain.json
 
-      - name: Upload domain JSON fragment
+      - name: Upload domain artifact
         uses: actions/upload-artifact@v4
         with:
           name: ssl-${{ matrix.domain }}
           path: domain.json
 
 
+  # -----------------------------------------
+  # Merge + Commit Safely
+  # -----------------------------------------
   commit_changes:
-    name: Merge & Commit
+    needs: generate_pins
     runs-on: ubuntu-latest
-    needs: verify_ssl
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all domain artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Merge all JSON fragments safely
+      - name: Merge all JSON files
         run: |
           set -e
 
@@ -108,18 +120,29 @@ jobs:
           fi
 
           jq -s 'reduce .[] as $item ({}; . * $item)' $FILES > merged.json
-
           mv merged.json "$FINAL_FILE"
 
-      - name: Commit if changed
+      - name: Commit & Push Safely
         run: |
-          if git diff --quiet; then
+          set -e
+
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          git add app/src/main/assets/ssl_pins.json
+
+          if git diff --cached --quiet; then
             echo "✅ No changes detected"
             exit 0
           fi
 
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add app/src/main/assets/ssl_pins.json
           git commit -m "Auto-update SSL pins [skip ci]"
-          git push
+
+          # Retry logic to avoid race condition
+          for i in {1..3}; do
+            git pull --rebase origin main && break
+            echo "Retrying pull..."
+            sleep 2
+          done
+
+          git push origin main
