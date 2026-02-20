@@ -1,5 +1,8 @@
 {
   "stageapi.currently.social": [
     "sha256/fxIjshaHVRVP4NqYLDsjeBvS692ZLjdLBVW67XMVx5E="
+  ],
+  "stagegame.currently.social": [
+    "sha256/G9LNNAql897egYsabashkzUCTEJkWBzgoEtk8X/678c="
   ]
 }
