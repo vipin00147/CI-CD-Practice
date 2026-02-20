@@ -27,13 +27,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y openssl jq
 
-      - name: Generate SSL Pin (Intermediate)
-        id: generate_pin
+      - name: Generate Intermediate SSL Pin
         run: |
           set -e
 
           DOMAIN="${{ matrix.domain }}"
-
           echo "🔍 Checking $DOMAIN"
 
           PIN=$(openssl s_client -connect $DOMAIN:443 -servername $DOMAIN -showcerts </dev/null 2>/dev/null \
@@ -49,7 +47,6 @@ jobs:
           fi
 
           GENERATED_PIN="sha256/$PIN"
-
           echo "Generated Pin: $GENERATED_PIN"
 
           # Create domain-only JSON fragment
@@ -75,26 +72,32 @@ jobs:
         with:
           path: artifacts
 
-      - name: Merge all domain JSON files
+      - name: Merge all JSON fragments safely
         run: |
           set -e
 
           FINAL_FILE="app/src/main/assets/ssl_pins.json"
           mkdir -p app/src/main/assets
 
-          # Start from existing file if present
+          FILES=""
+
+          # Include existing file if present
           if [ -f "$FINAL_FILE" ]; then
-            cp "$FINAL_FILE" merged.json
-          else
-            echo "{}" > merged.json
+            FILES="$FINAL_FILE"
           fi
 
-          # Merge each domain fragment
+          # Add all domain fragments
           for file in $(find artifacts -name domain.json); do
-            echo "Merging $file"
-            jq -s '.[0] * .[1]' merged.json "$file" > tmp.json
-            mv tmp.json merged.json
+            echo "Found fragment: $file"
+            FILES="$FILES $file"
           done
+
+          if [ -z "$FILES" ]; then
+            echo "No files to merge"
+            exit 0
+          fi
+
+          jq -s 'reduce .[] as $item ({}; . * $item)' $FILES > merged.json
 
           mv merged.json "$FINAL_FILE"
 
