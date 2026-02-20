@@ -10,8 +10,14 @@ permissions:
 
 jobs:
   verify_ssl:
-    name: Verify SSL Pins
+    name: Verify SSL - ${{ matrix.domain }}
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        domain:
+          - stageapi.currently.social
+          - stagegame.currently.social
 
     steps:
       - uses: actions/checkout@v4
@@ -27,26 +33,24 @@ jobs:
         run: |
           set -e
 
-          DOMAIN="stageapi.currently.social"
+          DOMAIN="${{ matrix.domain }}"
           JSON_FILE="app/src/main/assets/ssl_pins.json"
 
           echo "🔍 Checking $DOMAIN"
 
-          # Ensure directory exists
           mkdir -p app/src/main/assets
 
-          # Create JSON if missing
           if [ ! -f "$JSON_FILE" ]; then
             echo "{}" > "$JSON_FILE"
           fi
 
           # Extract INTERMEDIATE certificate public key pin
-            PIN=$(openssl s_client -connect $DOMAIN:443 -servername $DOMAIN -showcerts </dev/null 2>/dev/null \
-              | awk '/BEGIN CERTIFICATE/{i++} i==2' \
-              | openssl x509 -pubkey -noout \
-              | openssl pkey -pubin -outform DER \
-              | openssl dgst -sha256 -binary \
-              | openssl enc -base64)
+          PIN=$(openssl s_client -connect $DOMAIN:443 -servername $DOMAIN -showcerts </dev/null 2>/dev/null \
+            | awk '/BEGIN CERTIFICATE/{i++} i==2' \
+            | openssl x509 -pubkey -noout \
+            | openssl pkey -pubin -outform DER \
+            | openssl dgst -sha256 -binary \
+            | openssl enc -base64)
 
           if [ -z "$PIN" ]; then
             echo "❌ Failed to extract certificate pin"
@@ -56,10 +60,7 @@ jobs:
           GENERATED_PIN="sha256/$PIN"
           echo "Generated Pin: $GENERATED_PIN"
 
-          # If domain not present → add it
           if ! jq -e --arg DOMAIN "$DOMAIN" '.[$DOMAIN]' "$JSON_FILE" > /dev/null 2>&1; then
-            echo "➕ Adding $DOMAIN to ssl_pins.json"
-
             jq --arg DOMAIN "$DOMAIN" \
                --arg PIN "$GENERATED_PIN" \
                '. + {($DOMAIN): [$PIN]}' \
@@ -70,23 +71,22 @@ jobs:
             exit 0
           fi
 
-          # Validate existing pin
           EXPECTED_PIN=$(jq -r --arg DOMAIN "$DOMAIN" '.[$DOMAIN][0]' "$JSON_FILE")
 
           if [ "$GENERATED_PIN" != "$EXPECTED_PIN" ]; then
             echo "❌ SSL Pin mismatch!"
             echo "Expected: $EXPECTED_PIN"
             echo "Got:      $GENERATED_PIN"
-            exit 0
+            exit 1
           fi
 
           echo "✅ Pins verified successfully"
 
-      - name: Commit updated pin (if changed)
+      - name: Commit updated pin
         if: env.PIN_UPDATED == 'true'
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add app/src/main/assets/ssl_pins.json
-          git commit -m "Auto-update SSL pin [skip ci]"
+          git commit -m "Auto-update SSL pin for ${{ matrix.domain }} [skip ci]"
           git push
