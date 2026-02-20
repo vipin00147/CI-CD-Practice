@@ -59,13 +59,6 @@ jobs:
 
             mv tmp.json "$JSON_FILE"
             echo "✅ Pins stored"
-
-          - name: Upload ssl_pins.json
-              uses: actions/upload-artifact@v4
-              with:
-                name: ssl_pins
-                path: ssl_pins.json
-                exit 0
           fi
 
           # Validate existing pin
