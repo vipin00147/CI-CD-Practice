@@ -1,4 +1,4 @@
-name: CI
+name: SSL Certificate verify and create Job
 
 on:
   push:
@@ -9,6 +9,7 @@ jobs:
   verify_ssl:
     name: Verify SSL Pins
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -26,30 +27,34 @@ jobs:
 
           echo "🔍 Checking $DOMAIN"
 
+          # Create JSON file if missing
           if [ ! -f "$JSON_FILE" ]; then
             echo "{}" > "$JSON_FILE"
           fi
 
-          openssl s_client -connect $DOMAIN:443 -servername $DOMAIN -showcerts </dev/null 2>/dev/null > chain.pem
-          csplit -z chain.pem '/-----BEGIN CERTIFICATE-----/' '{*}' > /dev/null 2>&1 || true
+          # Extract ONLY leaf certificate public key pin
+          PIN=$(openssl s_client -connect $DOMAIN:443 -servername $DOMAIN </dev/null 2>/dev/null \
+            | openssl x509 -pubkey -noout \
+            | openssl pkey -pubin -outform DER \
+            | openssl dgst -sha256 -binary \
+            | openssl enc -base64)
 
-          GENERATED_PINS=""
+          if [ -z "$PIN" ]; then
+            echo "❌ Failed to extract certificate pin"
+            exit 1
+          fi
 
-          for cert in xx*; do
-            PIN=$(openssl x509 -in "$cert" -pubkey -noout \
-              | openssl pkey -pubin -outform DER \
-              | openssl dgst -sha256 -binary \
-              | openssl enc -base64)
+          GENERATED_PIN="sha256/$PIN"
 
-            GENERATED_PINS="$GENERATED_PINS sha256/$PIN"
-          done
+          echo "Generated Pin: $GENERATED_PIN"
 
-          rm -f xx* chain.pem
-
+          # If domain not in JSON → add automatically
           if ! jq -e --arg DOMAIN "$DOMAIN" '.[$DOMAIN]' "$JSON_FILE" > /dev/null 2>&1; then
+            echo "➕ Adding $DOMAIN to ssl_pins.json"
+
             jq --arg DOMAIN "$DOMAIN" \
-               --arg PINS "$GENERATED_PINS" \
-               '. + {($DOMAIN): ($PINS | split(" ") | map(select(length > 0)))}' \
+               --arg PIN "$GENERATED_PIN" \
+               '. + {($DOMAIN): [$PIN]}' \
                "$JSON_FILE" > tmp.json
 
             mv tmp.json "$JSON_FILE"
@@ -57,19 +62,13 @@ jobs:
             exit 0
           fi
 
-          EXPECTED_PINS=$(jq -r --arg DOMAIN "$DOMAIN" '.[$DOMAIN][]' "$JSON_FILE")
+          # Validate existing pin
+          EXPECTED_PIN=$(jq -r --arg DOMAIN "$DOMAIN" '.[$DOMAIN][0]' "$JSON_FILE")
 
-          MATCH=false
-          for GENERATED in $GENERATED_PINS; do
-            for EXPECTED in $EXPECTED_PINS; do
-              if [ "$GENERATED" = "$EXPECTED" ]; then
-                MATCH=true
-              fi
-            done
-          done
-
-          if [ "$MATCH" = false ]; then
+          if [ "$GENERATED_PIN" != "$EXPECTED_PIN" ]; then
             echo "❌ SSL Pin mismatch!"
+            echo "Expected: $EXPECTED_PIN"
+            echo "Got:      $GENERATED_PIN"
             exit 1
           fi
 
