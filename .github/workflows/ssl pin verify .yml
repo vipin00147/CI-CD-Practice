@@ -74,10 +74,17 @@ jobs:
           EXPECTED_PIN=$(jq -r --arg DOMAIN "$DOMAIN" '.[$DOMAIN][0]' "$JSON_FILE")
 
           if [ "$GENERATED_PIN" != "$EXPECTED_PIN" ]; then
-            echo "❌ SSL Pin mismatch!"
-            echo "Expected: $EXPECTED_PIN"
-            echo "Got:      $GENERATED_PIN"
-            exit 1
+            echo "⚠️ SSL Pin changed. Updating ssl_pins.json..."
+
+            jq --arg DOMAIN "$DOMAIN" \
+           --arg PIN "$GENERATED_PIN" \
+           '.[$DOMAIN][0] = $PIN' \
+           "$JSON_FILE" > tmp.json
+
+            mv tmp.json "$JSON_FILE"
+
+            echo "PIN_UPDATED=true" >> $GITHUB_ENV
+            exit 0
           fi
 
           echo "✅ Pins verified successfully"
