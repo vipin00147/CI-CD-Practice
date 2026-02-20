@@ -27,20 +27,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y openssl jq
 
-      - name: Generate / Verify SSL Pin
+      - name: Generate SSL Pin (Intermediate)
+        id: generate_pin
         run: |
           set -e
 
           DOMAIN="${{ matrix.domain }}"
-          JSON_FILE="app/src/main/assets/ssl_pins.json"
 
-          mkdir -p app/src/main/assets
+          echo "🔍 Checking $DOMAIN"
 
-          if [ ! -f "$JSON_FILE" ]; then
-            echo "{}" > "$JSON_FILE"
-          fi
-
-          # Extract INTERMEDIATE certificate public key pin
           PIN=$(openssl s_client -connect $DOMAIN:443 -servername $DOMAIN -showcerts </dev/null 2>/dev/null \
             | awk '/BEGIN CERTIFICATE/{i++} i==2' \
             | openssl x509 -pubkey -noout \
@@ -54,54 +49,48 @@ jobs:
           fi
 
           GENERATED_PIN="sha256/$PIN"
-          echo "Generated pin for $DOMAIN: $GENERATED_PIN"
 
-          if ! jq -e --arg DOMAIN "$DOMAIN" '.[$DOMAIN]' "$JSON_FILE" > /dev/null 2>&1; then
-            jq --arg DOMAIN "$DOMAIN" \
-               --arg PIN "$GENERATED_PIN" \
-               '. + {($DOMAIN): [$PIN]}' \
-               "$JSON_FILE" > tmp.json
-            mv tmp.json "$JSON_FILE"
-          else
-            EXPECTED_PIN=$(jq -r --arg DOMAIN "$DOMAIN" '.[$DOMAIN][0]' "$JSON_FILE")
+          echo "Generated Pin: $GENERATED_PIN"
 
-            if [ "$GENERATED_PIN" != "$EXPECTED_PIN" ]; then
-              echo "Updating pin for $DOMAIN"
-              jq --arg DOMAIN "$DOMAIN" \
-                 --arg PIN "$GENERATED_PIN" \
-                 '.[$DOMAIN][0] = $PIN' \
-                 "$JSON_FILE" > tmp.json
-              mv tmp.json "$JSON_FILE"
-            fi
-          fi
+          # Create domain-only JSON fragment
+          echo "{ \"${DOMAIN}\": [\"${GENERATED_PIN}\"] }" > domain.json
 
-      - name: Upload updated file
+      - name: Upload domain JSON fragment
         uses: actions/upload-artifact@v4
         with:
-          name: ssl-pins-${{ matrix.domain }}
-          path: app/src/main/assets/ssl_pins.json
+          name: ssl-${{ matrix.domain }}
+          path: domain.json
+
 
   commit_changes:
-    name: Commit Changes
+    name: Merge & Commit
     runs-on: ubuntu-latest
     needs: verify_ssl
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download all domain artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
       - name: Merge all domain JSON files
         run: |
-          mkdir -p app/src/main/assets
+          set -e
+
           FINAL_FILE="app/src/main/assets/ssl_pins.json"
+          mkdir -p app/src/main/assets
 
-          echo "{}" > merged.json
+          # Start from existing file if present
+          if [ -f "$FINAL_FILE" ]; then
+            cp "$FINAL_FILE" merged.json
+          else
+            echo "{}" > merged.json
+          fi
 
-          for file in $(find artifacts -name ssl_pins.json); do
+          # Merge each domain fragment
+          for file in $(find artifacts -name domain.json); do
             echo "Merging $file"
             jq -s '.[0] * .[1]' merged.json "$file" > tmp.json
             mv tmp.json merged.json
@@ -112,7 +101,7 @@ jobs:
       - name: Commit if changed
         run: |
           if git diff --quiet; then
-            echo "No changes detected"
+            echo "✅ No changes detected"
             exit 0
           fi
 
