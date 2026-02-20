@@ -1,20 +1,20 @@
 {
   "control.currently.social": [
-    "sha256/iFvwVyJSxnQdyaUvUERIf+8qk7gRze3612JMwoO3zdU="
+    "sha256/111"
   ],
   "dev.analytics.currently.social": [
-    "sha256/DxH4tt40L+eduF6szpY6TONlxhZhBd+pJ9wbHlQ2fuw="
+    "sha256/222"
   ],
   "stage.chat.currently.social": [
-    "sha256/G9LNNAql897egYsabashkzUCTEJkWBzgoEtk8X/678c="
+    "sha256/333"
   ],
   "api.playsuper.club": [
-    "sha256/vxRon/El5KuI4vx5ey1DgmsYmRY0nDd5Cg4GfJ8S+bg="
+    "sha256/444"
   ],
   "stageapi.currently.social": [
-    "sha256/DxH4tt40L+eduF6szpY6TONlxhZhBd+pJ9wbHlQ2fuw="
+    "sha256/555"
   ],
   "stagegame.currently.social": [
-    "sha256/G9LNNAql897egYsabashkzUCTEJkWBzgoEtk8X/678c="
+    "sha256/666"
   ]
 }
