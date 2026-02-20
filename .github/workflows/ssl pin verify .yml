@@ -1,4 +1,4 @@
-name: SSL Certificate verify and create Job
+name: SSL Pin Verification
 
 on:
   push:
@@ -12,27 +12,32 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y openssl jq
 
-      - name: Verify SSL Pins
+      - name: Generate / Verify SSL Pin
         run: |
           set -e
 
-          JSON_FILE="ssl_pins.json"
           DOMAIN="stageapi.currently.social"
+          JSON_FILE="app/src/main/assets/ssl_pins.json"
 
           echo "🔍 Checking $DOMAIN"
 
-          # Create JSON file if missing
+          # Ensure directory exists
+          mkdir -p app/src/main/assets
+
+          # Create JSON if missing
           if [ ! -f "$JSON_FILE" ]; then
             echo "{}" > "$JSON_FILE"
           fi
 
-          # Extract ONLY leaf certificate public key pin
+          # Extract leaf certificate public key pin
           PIN=$(openssl s_client -connect $DOMAIN:443 -servername $DOMAIN </dev/null 2>/dev/null \
             | openssl x509 -pubkey -noout \
             | openssl pkey -pubin -outform DER \
@@ -45,10 +50,9 @@ jobs:
           fi
 
           GENERATED_PIN="sha256/$PIN"
-
           echo "Generated Pin: $GENERATED_PIN"
 
-          # If domain not in JSON → add automatically
+          # If domain not present → add it
           if ! jq -e --arg DOMAIN "$DOMAIN" '.[$DOMAIN]' "$JSON_FILE" > /dev/null 2>&1; then
             echo "➕ Adding $DOMAIN to ssl_pins.json"
 
@@ -58,7 +62,8 @@ jobs:
                "$JSON_FILE" > tmp.json
 
             mv tmp.json "$JSON_FILE"
-            echo "✅ Pins stored"
+            echo "PIN_UPDATED=true" >> $GITHUB_ENV
+            exit 0
           fi
 
           # Validate existing pin
@@ -72,3 +77,12 @@ jobs:
           fi
 
           echo "✅ Pins verified successfully"
+
+      - name: Commit updated pin (if changed)
+        if: env.PIN_UPDATED == 'true'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add app/src/main/assets/ssl_pins.json
+          git commit -m "Auto-update SSL pin [skip ci]"
+          git push
