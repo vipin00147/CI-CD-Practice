@@ -40,6 +40,7 @@ jobs:
             echo "{}" > "$JSON_FILE"
           fi
 
+          # Extract INTERMEDIATE certificate public key pin
           PIN=$(openssl s_client -connect $DOMAIN:443 -servername $DOMAIN -showcerts </dev/null 2>/dev/null \
             | awk '/BEGIN CERTIFICATE/{i++} i==2' \
             | openssl x509 -pubkey -noout \
@@ -53,6 +54,7 @@ jobs:
           fi
 
           GENERATED_PIN="sha256/$PIN"
+          echo "Generated pin for $DOMAIN: $GENERATED_PIN"
 
           if ! jq -e --arg DOMAIN "$DOMAIN" '.[$DOMAIN]' "$JSON_FILE" > /dev/null 2>&1; then
             jq --arg DOMAIN "$DOMAIN" \
@@ -64,6 +66,7 @@ jobs:
             EXPECTED_PIN=$(jq -r --arg DOMAIN "$DOMAIN" '.[$DOMAIN][0]' "$JSON_FILE")
 
             if [ "$GENERATED_PIN" != "$EXPECTED_PIN" ]; then
+              echo "Updating pin for $DOMAIN"
               jq --arg DOMAIN "$DOMAIN" \
                  --arg PIN "$GENERATED_PIN" \
                  '.[$DOMAIN][0] = $PIN' \
@@ -91,10 +94,20 @@ jobs:
         with:
           path: artifacts
 
-      - name: Merge updated files
+      - name: Merge all domain JSON files
         run: |
           mkdir -p app/src/main/assets
-          find artifacts -name ssl_pins.json -exec cp {} app/src/main/assets/ssl_pins.json \;
+          FINAL_FILE="app/src/main/assets/ssl_pins.json"
+
+          echo "{}" > merged.json
+
+          for file in $(find artifacts -name ssl_pins.json); do
+            echo "Merging $file"
+            jq -s '.[0] * .[1]' merged.json "$file" > tmp.json
+            mv tmp.json merged.json
+          done
+
+          mv merged.json "$FINAL_FILE"
 
       - name: Commit if changed
         run: |
