@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify_ssl:
+    name: Verify SSL Pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssl jq
+
+      - name: Verify SSL Pins
+        run: |
+          set -e
+
+          JSON_FILE="ssl_pins.json"
+          DOMAIN="stageapi.currently.social"
+
+          echo "🔍 Checking $DOMAIN"
+
+          if [ ! -f "$JSON_FILE" ]; then
+            echo "{}" > "$JSON_FILE"
+          fi
+
+          openssl s_client -connect $DOMAIN:443 -servername $DOMAIN -showcerts </dev/null 2>/dev/null > chain.pem
+          csplit -z chain.pem '/-----BEGIN CERTIFICATE-----/' '{*}' > /dev/null 2>&1 || true
+
+          GENERATED_PINS=""
+
+          for cert in xx*; do
+            PIN=$(openssl x509 -in "$cert" -pubkey -noout \
+              | openssl pkey -pubin -outform DER \
+              | openssl dgst -sha256 -binary \
+              | openssl enc -base64)
+
+            GENERATED_PINS="$GENERATED_PINS sha256/$PIN"
+          done
+
+          rm -f xx* chain.pem
+
+          if ! jq -e --arg DOMAIN "$DOMAIN" '.[$DOMAIN]' "$JSON_FILE" > /dev/null 2>&1; then
+            jq --arg DOMAIN "$DOMAIN" \
+               --arg PINS "$GENERATED_PINS" \
+               '. + {($DOMAIN): ($PINS | split(" ") | map(select(length > 0)))}' \
+               "$JSON_FILE" > tmp.json
+
+            mv tmp.json "$JSON_FILE"
+            echo "✅ Pins stored"
+            exit 0
+          fi
+
+          EXPECTED_PINS=$(jq -r --arg DOMAIN "$DOMAIN" '.[$DOMAIN][]' "$JSON_FILE")
+
+          MATCH=false
+          for GENERATED in $GENERATED_PINS; do
+            for EXPECTED in $EXPECTED_PINS; do
+              if [ "$GENERATED" = "$EXPECTED" ]; then
+                MATCH=true
+              fi
+            done
+          done
+
+          if [ "$MATCH" = false ]; then
+            echo "❌ SSL Pin mismatch!"
+            exit 1
+          fi
+
+          echo "✅ Pins verified successfully"
